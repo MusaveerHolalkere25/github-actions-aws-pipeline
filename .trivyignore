@@ -1,0 +1,5 @@
+# Demo-only exceptions for the sandbox bucket. Remove them for real workloads.
+# Customer-managed KMS key for S3 (adds cost and a key to manage; SSE-S3 is used here)
+AVD-AWS-0132
+# Access logging on the demo bucket
+AVD-AWS-0089

@@ -1,0 +1,85 @@
+name: ci
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.10"
+          terraform_wrapper: false
+
+      - name: Format
+        run: terraform fmt -check -recursive
+
+      - name: Validate
+        run: |
+          for dir in bootstrap stacks/*/; do
+            echo "== $dir"
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+
+      - uses: terraform-linters/setup-tflint@v4
+
+      - name: TFLint
+        run: |
+          tflint --init
+          tflint --recursive
+
+      # Blocking for the deployable stacks...
+      - name: Checkov (stacks)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: stacks
+          framework: terraform
+          # Demo-only exceptions: logging, KMS, replication, lifecycle and notifications cost money or add noise
+          skip_check: CKV_AWS_18,CKV_AWS_144,CKV_AWS_145,CKV2_AWS_61,CKV2_AWS_62
+
+      # ...and report-only for the one-time bootstrap code.
+      - name: Checkov (bootstrap, report only)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: bootstrap
+          framework: terraform
+          soft_fail: true
+
+      - name: Trivy config scan (stacks)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: stacks
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          trivyignores: .trivyignore
+
+  plan-sandbox:
+    name: plan (sandbox)
+    needs: static
+    # Skipped until the AWS side is set up (see README), so a fresh clone stays green.
+    if: vars.AWS_PLAN_ROLE_ARN != ''
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      mode: plan
+      working_directory: stacks/sandbox
+      aws_region: ${{ vars.AWS_REGION }}
+      role_arn: ${{ vars.AWS_PLAN_ROLE_ARN }}
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      state_key: sandbox/terraform.tfstate

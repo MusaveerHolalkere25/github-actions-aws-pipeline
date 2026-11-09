@@ -1,0 +1,33 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "stacks/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two applies at once.
+concurrency:
+  group: terraform-apply
+  cancel-in-progress: false
+
+jobs:
+  apply-sandbox:
+    if: vars.AWS_APPLY_ROLE_ARN != ''
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      mode: apply
+      working_directory: stacks/sandbox
+      aws_region: ${{ vars.AWS_REGION }}
+      role_arn: ${{ vars.AWS_APPLY_ROLE_ARN }}
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      state_key: sandbox/terraform.tfstate
+      environment: production
